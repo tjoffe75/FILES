@@ -105,3 +105,4 @@ FILES är en skalbar, modulär och portabel webbapplikation som kan köras var s
 8. Designa och implementera load- och stresstester för upload- och download-flödet
 9. Genomför säkerhetsgranskning och penetrationstest (fokus filvalidering & auth)
 10. Förbered och publicera första release-tag (v0.1.0) och skriv changelog
+11.
