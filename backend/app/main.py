@@ -3,9 +3,10 @@
 import os
 import uuid
 import hashlib
-
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import pika
 import psycopg2
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 
 app = FastAPI()
 
@@ -18,29 +19,26 @@ async def healthz():
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...), owner_id: str = "anonymous"):
-    # 1) Se till att upload-mappen finns
-    uploads_dir = "./app/uploads"
+    # 1) Ensure upload directory exists
+    uploads_dir = os.path.join(os.getcwd(), "app", "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
 
-    # 2) Spara fil chunk för chunk och bygg SHA256-checksum
+    # 2) Save file chunk by chunk and compute SHA256
     file_id = str(uuid.uuid4())
-    save_path = f"{uploads_dir}/{file_id}_{file.filename}"
+    save_path = os.path.join(uploads_dir, f"{file_id}_{file.filename}")
     sha256 = hashlib.sha256()
-    with open(save_path, "wb") as out:
-        while True:
-            chunk = await file.read(1024*1024)
-            if not chunk:
-                break
+    with open(save_path, "wb") as out_file:
+        while chunk := await file.read(1024 * 1024):
             sha256.update(chunk)
-            out.write(chunk)
+            out_file.write(chunk)
     checksum = sha256.hexdigest()
 
-    # 3) Skriv metadata till Postgres
+    # 3) Insert metadata into Postgres
     try:
         conn = get_db_conn()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO files (id, filename, checksum, status, owner_id) VALUES (%s,%s,%s,%s,%s)",
+            "INSERT INTO files (id, filename, checksum, status, owner_id) VALUES (%s, %s, %s, %s, %s)",
             (file_id, file.filename, checksum, "pending_scan", owner_id)
         )
         conn.commit()
@@ -49,5 +47,46 @@ async def upload(file: UploadFile = File(...), owner_id: str = "anonymous"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
-    # 4) Returnera UUID och checksum
+    # 4) Publish job to RabbitMQ
+    try:
+        params = pika.URLParameters(os.getenv("RABBITMQ_URL"))
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue="upload_jobs", durable=True)
+        channel.basic_publish(
+            exchange="",
+            routing_key="upload_jobs",
+            body=file_id,
+            properties=pika.BasicProperties(delivery_mode=2)
+        )
+        connection.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Message queue error: {e}")
+
+    # 5) Return the generated ID and checksum
     return {"file_id": file_id, "checksum": checksum}
+
+@app.get("/download/{file_id}")
+async def download(file_id: str, owner_id: str = "anonymous"):
+    # Retrieve metadata
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT filename, status, owner_id FROM files WHERE id = %s",
+        (file_id,)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    filename, status, db_owner = row
+    # Check approved status
+    if status != "approved":
+        raise HTTPException(status_code=403, detail="File not approved for download")
+
+    # Serve file
+    file_path = os.path.join(os.getcwd(), "app", "uploads", f"{file_id}_{filename}")
+    return FileResponse(path=file_path, filename=filename, media_type="application/octet-stream")
