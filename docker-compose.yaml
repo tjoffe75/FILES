@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  frontend:
+    image: node:16
+  backend:
+    image: python:3.10
+  rabbitmq:
+    image: rabbitmq:3-management
+  clamav:
+    image: clamav/clamav:latest
+  worker:
+    image: python:3.10
+  postgres:
+    image: postgres:14
