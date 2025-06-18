@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   frontend:
     build:
@@ -18,15 +20,20 @@ services:
     image: files-backend:latest
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend/app/uploads:/app/app/uploads  # mount uploads-mappen
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/filesdb
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - CLAMAV_HOST=clamav
       - CLAMAV_PORT=3310
     depends_on:
-      - postgres
-      - rabbitmq
-      - clamav
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -54,15 +61,21 @@ services:
       context: ./workers
       dockerfile: Dockerfile
     image: files-worker:latest
+    volumes:
+      - ./backend/app/uploads:/app/uploads   # tillgång till uppladdade filer
+      - ./workers:/app                       # kopiera in worker-skripten
     environment:
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/filesdb
       - CLAMAV_HOST=clamav
       - CLAMAV_PORT=3310
     depends_on:
-      - rabbitmq
-      - clamav
-      - postgres
+      rabbitmq:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:14
