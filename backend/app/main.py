@@ -66,6 +66,34 @@ async def upload(file: UploadFile = File(...), owner_id: str = "anonymous"):
     # 5) Return the generated ID and checksum
     return {"file_id": file_id, "checksum": checksum}
 
+from typing import List, Dict
+
+@app.get("/files", response_model=List[Dict])
+async def list_files(owner_id: str = "anonymous"):
+    """
+    Returnerar en lista på alla filer för angivet owner_id,
+    med fält: id, filename, status och created_at.
+    """
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, filename, status, created_at FROM files WHERE owner_id = %s ORDER BY created_at DESC",
+        (owner_id,)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    result = []
+    for file_id, filename, status, created_at in rows:
+        result.append({
+            "id": str(file_id),
+            "filename": filename,
+            "status": status,
+            "created_at": created_at.isoformat()
+        })
+    return result
+
 @app.get("/download/{file_id}")
 async def download(file_id: str, owner_id: str = "anonymous"):
     # Retrieve metadata
