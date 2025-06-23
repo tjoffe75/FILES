@@ -31,12 +31,7 @@ def get_setting(key: str) -> bool:
     return bool(row and row[0].lower() == "true")
 
 def verify_jwt_token(token: str) -> Optional[dict]:
-    """
-    Verifierar JWT och returnerar payload (t.ex. {'sub': user_id, 'roles': [...]}),
-    eller None om ogiltig.
-    """
     try:
-        # token format: "Bearer eyJ..."
         _, jwt_token = token.split(" ", 1)
         payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
@@ -47,17 +42,14 @@ def verify_jwt_token(token: str) -> Optional[dict]:
 # ─── RBAC/SSO‐middleware ────────────────────────────────────────────────────────
 @app.middleware("http")
 async def rbac_middleware(request: Request, call_next):
-    # Om RBAC är OFF → Configuration Mode
     if not get_setting("rbac_enabled"):
         return await call_next(request)
 
-    # Annars krävs Authorization-header
     auth = request.headers.get("Authorization")
     payload = verify_jwt_token(auth or "")
     if not payload:
         return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
-    # Fäst användarinfo
     class User: ...
     user = User()
     user.id = payload.get("sub")
@@ -71,19 +63,47 @@ async def rbac_middleware(request: Request, call_next):
 async def healthz():
     return {"status": "ok"}
 
+# ─── GET för att läsa in inställningar ──────────────────────────────────────────
+@app.get("/admin/settings")
+async def get_admin_settings():
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT key, value FROM settings")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {k: v for k, v in rows}
+# ────────────────────────────────────────────────────────────────────────────────
+
+# ─── POST för att spara nya inställningar ───────────────────────────────────────
+@app.post("/admin/settings")
+async def save_admin_settings(settings: Dict[str, str]):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    for key, value in settings.items():
+        cur.execute(
+            """
+            INSERT INTO settings(key, value) VALUES (%s, %s)
+            ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (key, value),
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "ok", "updated": list(settings.keys())}
+# ────────────────────────────────────────────────────────────────────────────────
+
 @app.post("/upload")
 async def upload(request: Request, file: UploadFile = File(...), owner_id: str = "anonymous"):
-    # RBAC‐skydd
     if get_setting("rbac_enabled"):
         user = getattr(request.state, "user", None)
         if not user or ("user" not in user.roles and "admin" not in user.roles):
             raise HTTPException(status_code=403, detail="Forbidden")
 
-    # 1) Ensure upload dir
     uploads_dir = os.path.join(os.getcwd(), "app", "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
 
-    # 2) Save & checksum
     file_id = str(uuid.uuid4())
     save_path = os.path.join(uploads_dir, f"{file_id}_{file.filename}")
     sha256 = hashlib.sha256()
@@ -93,7 +113,6 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
             out_file.write(chunk)
     checksum = sha256.hexdigest()
 
-    # 3) Insert metadata
     try:
         conn = get_db_conn()
         cur = conn.cursor()
@@ -107,7 +126,6 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
-    # 4) Publish job
     try:
         params = pika.URLParameters(os.getenv("RABBITMQ_URL"))
         connection = pika.BlockingConnection(params)
@@ -120,14 +138,13 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
             properties=pika.BasicProperties(delivery_mode=2),
         )
         connection.close()
-    except Exception as e):
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Message queue error: {e}")
 
     return {"file_id": file_id, "checksum": checksum}
 
 @app.get("/files", response_model=List[Dict])
 async def list_files(request: Request, owner_id: str = "anonymous"):
-    # RBAC‐skydd
     if get_setting("rbac_enabled"):
         user = getattr(request.state, "user", None)
         if not user or ("user" not in user.roles and "admin" not in user.roles):
@@ -150,7 +167,6 @@ async def list_files(request: Request, owner_id: str = "anonymous"):
 
 @app.get("/download/{file_id}")
 async def download(request: Request, file_id: str, owner_id: str = "anonymous"):
-    # RBAC‐skydd
     if get_setting("rbac_enabled"):
         user = getattr(request.state, "user", None)
         if not user or ("user" not in user.roles and "admin" not in user.roles):
@@ -165,6 +181,7 @@ async def download(request: Request, file_id: str, owner_id: str = "anonymous"):
 
     if not row:
         raise HTTPException(status_code=404, detail="File not found")
+
     filename, status, db_owner = row
     if status != "approved":
         raise HTTPException(status_code=403, detail="File not approved for download")

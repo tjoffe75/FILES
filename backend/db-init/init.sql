@@ -17,4 +17,7 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT INTO settings (key, value) VALUES
 ('rbac_enabled', 'false'),
 ('oidc_enabled', 'false')
+('retention_enabled','false'),
+('logo_url',''),
+ ('cleanup_schedule','daily')
 ON CONFLICT (key) DO NOTHING;
