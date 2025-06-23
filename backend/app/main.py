@@ -8,11 +8,16 @@ import psycopg2
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from typing import List, Dict
+from typing import List, Dict, Optional
+from jose import JWTError, jwt
+
+# Secret + algoritm (lägg gärna i .env senare)
+JWT_SECRET = os.getenv("JWT_SECRET", "dinSuperHemligaNyckel")
+JWT_ALGORITHM = "HS256"
 
 app = FastAPI()
 
-# ─── Hjälpfunktioner (måste ligga före middleware) ─────────────────────────────
+# ─── Hjälpfunktioner ────────────────────────────────────────────────────────────
 def get_db_conn():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
 
@@ -24,23 +29,40 @@ def get_setting(key: str) -> bool:
     cur.close()
     conn.close()
     return bool(row and row[0].lower() == "true")
+
+def verify_jwt_token(token: str) -> Optional[dict]:
+    """
+    Verifierar JWT och returnerar payload (t.ex. {'sub': user_id, 'roles': [...]}),
+    eller None om ogiltig.
+    """
+    try:
+        # token format: "Bearer eyJ..."
+        _, jwt_token = token.split(" ", 1)
+        payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except (JWTError, ValueError):
+        return None
 # ────────────────────────────────────────────────────────────────────────────────
 
 # ─── RBAC/SSO‐middleware ────────────────────────────────────────────────────────
 @app.middleware("http")
 async def rbac_middleware(request: Request, call_next):
-    # Om RBAC är OFF, låt allt passera
+    # Om RBAC är OFF → Configuration Mode
     if not get_setting("rbac_enabled"):
         return await call_next(request)
 
-    # Annars krävs en Authorization-header
-    token = request.headers.get("Authorization")
-    if not token:
+    # Annars krävs Authorization-header
+    auth = request.headers.get("Authorization")
+    payload = verify_jwt_token(auth or "")
+    if not payload:
         return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
-    # TODO: verifiera token och sätt request.state.user
-    # user = verify_jwt(token)
-    # request.state.user = user
+    # Fäst användarinfo
+    class User: ...
+    user = User()
+    user.id = payload.get("sub")
+    user.roles = payload.get("roles", [])
+    request.state.user = user
 
     return await call_next(request)
 # ────────────────────────────────────────────────────────────────────────────────
@@ -61,7 +83,7 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
     uploads_dir = os.path.join(os.getcwd(), "app", "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
 
-    # 2) Spara och checksum
+    # 2) Save & checksum
     file_id = str(uuid.uuid4())
     save_path = os.path.join(uploads_dir, f"{file_id}_{file.filename}")
     sha256 = hashlib.sha256()
@@ -71,12 +93,12 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
             out_file.write(chunk)
     checksum = sha256.hexdigest()
 
-    # 3) Skriv metadata
+    # 3) Insert metadata
     try:
         conn = get_db_conn()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO files (id, filename, checksum, status, owner_id) VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO files (id, filename, checksum, status, owner_id) VALUES (%s,%s,%s,%s,%s)",
             (file_id, file.filename, checksum, "pending_scan", owner_id),
         )
         conn.commit()
@@ -85,7 +107,7 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
-    # 4) Publicera jobb
+    # 4) Publish job
     try:
         params = pika.URLParameters(os.getenv("RABBITMQ_URL"))
         connection = pika.BlockingConnection(params)
@@ -98,12 +120,10 @@ async def upload(request: Request, file: UploadFile = File(...), owner_id: str =
             properties=pika.BasicProperties(delivery_mode=2),
         )
         connection.close()
-    except Exception as e:
+    except Exception as e):
         raise HTTPException(status_code=500, detail=f"Message queue error: {e}")
 
-    # 5) Returnera svar
     return {"file_id": file_id, "checksum": checksum}
-
 
 @app.get("/files", response_model=List[Dict])
 async def list_files(request: Request, owner_id: str = "anonymous"):
@@ -116,7 +136,7 @@ async def list_files(request: Request, owner_id: str = "anonymous"):
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, filename, status, created_at FROM files WHERE owner_id = %s ORDER BY created_at DESC",
+        "SELECT id, filename, status, created_at FROM files WHERE owner_id=%s ORDER BY created_at DESC",
         (owner_id,),
     )
     rows = cur.fetchall()
@@ -128,7 +148,6 @@ async def list_files(request: Request, owner_id: str = "anonymous"):
         for r in rows
     ]
 
-
 @app.get("/download/{file_id}")
 async def download(request: Request, file_id: str, owner_id: str = "anonymous"):
     # RBAC‐skydd
@@ -139,14 +158,13 @@ async def download(request: Request, file_id: str, owner_id: str = "anonymous"):
 
     conn = get_db_conn()
     cur = conn.cursor()
-    cur.execute("SELECT filename, status, owner_id FROM files WHERE id = %s", (file_id,))
+    cur.execute("SELECT filename, status, owner_id FROM files WHERE id=%s", (file_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
 
     if not row:
         raise HTTPException(status_code=404, detail="File not found")
-
     filename, status, db_owner = row
     if status != "approved":
         raise HTTPException(status_code=403, detail="File not approved for download")
