@@ -90,7 +90,6 @@ Applikationen är designad för att användare ska kunna ladda upp filer, vilka 
 
 ## Återstående Uppgifter
 
-* [ ] Banner för "Configuration Mode" i Admin UI när `rbac_enabled == false`
 * [ ] Formulärvalidering och felhantering i SettingsPage och UploadPage (loading/spinner, error states)
 * [ ] Logotyp-uppladdning: ny `POST /admin/logo` endpoint och UI-komponent
 * [ ] Retention cleanup-jobb i worker + toggle i UI
@@ -117,9 +116,10 @@ Applikationen är designad för att användare ska kunna ladda upp filer, vilka 
 
 ## Nästa Steg
 
-1. 🔔 **Konfigurationsbanner**
+1. 🖼️ **Logotyp-uppladdning**
 
-   * Implementera i `SettingsPage.jsx` baserat på `settings.rbac_enabled` (röd banner)
+   * Backend: `POST /admin/logo`, spara URL i `settings.logo_url`
+   * Frontend: fil-input + preview i SettingsPage
 2. 🖼️ **Logotyp-uppladdning**
 
    * Backend: `POST /admin/logo`, spara URL i `settings.logo_url`
@@ -149,3 +149,10 @@ Applikationen är designad för att användare ska kunna ladda upp filer, vilka 
    * Paketera Admin UI image, uppdatera Compose
    * Tagga och publicera med changelog
 
+---
+
+*Skillnader mot tidigare plan:*
+
+* Rensat duplicerade rubriker
+* Komprimerat och sekventierat Next Steps-listan effektivt
+* Säkerställt konsekvens i numrering och formatering\*
