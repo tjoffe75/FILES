@@ -5,7 +5,17 @@
 **Kärnsyfte:**
 Applikationen är designad för att användare ska kunna ladda upp filer, vilka sedan verifieras med checksum och virusscanning innan de godkänns för lagring eller nedladdning.
 
-FILES är en skalbar, modulär och portabel webbapplikation som kan köras var som helst med Docker och Docker Compose som enda förutsättning. Den är byggd med moderna teknologier och containerbaserad distribution.
+**Användarupplevelse:**
+
+* 🎨 Gränssnittet ska vara tydligt, intuitivt och enkelt att använda genom hela applikationen, både i Admin UI och i Upload/Download-flöden.
+
+**Uppföljning av kärnsyfte:**
+
+* ✅ Upload API sparar metadata och checksum vid mottagning
+* ✅ Asynkron virusscanning (ClamAV INSTREAM) säkerställer ren fil
+* ✅ Download API levererar endast `approved` filer
+* ✅ RBAC och toggles skyddar åtkomst när produktion
+* ✅ Admin UI hanterar alla konfigurationsbehov
 
 ### 1. Frontend
 
@@ -13,28 +23,11 @@ FILES är en skalbar, modulär och portabel webbapplikation som kan köras var s
 * **Container:** Docker
 * **Funktioner:**
 
-  * Enkel och intuitiv användarupplevelse med tydliga kontroller och minimal komplexitet
-  * **Klar och användarvänlig UI även för uppladdnings- och nedladdningssidor**
-  * Chunked/resumable upload (>10 GB) via tus.io med progressindikator och parallella uppladdningar
-  * Administrationspanel (sparar inställningar i PostgreSQL):
-
-    * **All konfiguration hanteras uteslutande i Admin UI**
-    * RBAC-toggle (default OFF) för att växla mellan **Configuration Mode** och **Production Mode**
-    * OIDC/AD-toggle (default OFF) med fält för AD-domain, admin- och user-grupper
-    * Certifikathantering för HTTPS
-    * RabbitMQ-, DB- och webhook-/notifierings-inställningar
-    * Retentionsschema & rensningsschema (toggle default OFF)
-    * Logotyp-upload (brand logo)
-  * Avancerad sök- och filterfunktionalitet (datum, status, filtyp)
-
-### 2. Backend
-
-* **Teknik:** Python + FastAPI
-* **Container:** Docker
-* **Funktioner:**
-
   * `POST /upload`: tar emot filer, verifierar checksum, sparar metadata (pending\_scan) och enquear jobb i RabbitMQ
-  * `GET /files` & `GET /download/{file_id}`: listar och serverar endast `approved` filer
+  * `GET /files` & `GET /download/{file_id}`:
+
+    * När RBAC är **OFF**: alla kan lista och ladda ned godkända filer
+    * När RBAC är **ON**: `GET /files` returnerar endast filer där `owner_id = user.sub`; admin-roller ser **alla** filer
   * `GET` & `POST /admin/settings`: läs och spara alla Admin-inställningar i `settings`-tabell
   * RBAC/SSO-middleware med JWT-verifiering och rollkontroll
   * Worker-konsumenter med ClamAV INSTREAM och valfri sekundär motor (togglebar)
@@ -51,7 +44,19 @@ FILES är en skalbar, modulär och portabel webbapplikation som kan köras var s
     * Schema definierat i Admin UI (daily/weekly/monthly)
     * Toggle för aktivering (default OFF), sparas i DB
 
-### 4. Observability & Resilience
+### 4. Logging & Logghantering
+
+* **Loggning:**
+
+  * Skriva applikationsloggar till fil (roterande filer med daglig rullning)
+  * Konfigurerbar loggnivå (DEBUG/INFO/WARN/ERROR) via Admin UI
+* **Loggläsare i Admin UI:**
+
+  * Ny vy i Admin UI för att visa senaste loggradder
+  * Filter och sök i loggar (datum, nivå, meddelande)
+  * Möjlighet att ladda ner loggfil
+
+### 5. Observability & Resilience. Observability & Resilience
 
 * Prometheus-metrics och Grafana-alerts
 * OpenTelemetry-distributed tracing
@@ -89,6 +94,7 @@ FILES är en skalbar, modulär och portabel webbapplikation som kan köras var s
 * [ ] Formulärvalidering och felhantering i SettingsPage och UploadPage (loading/spinner, error states)
 * [ ] Logotyp-uppladdning: ny `POST /admin/logo` endpoint och UI-komponent
 * [ ] Retention cleanup-jobb i worker + toggle i UI
+* [ ] **Sekundär virusmotor**: integrera valfri alternativa scanningstjänst (VirusTotal API eller ClamAV multi-engine) som optional toggle
 * [ ] Enhetstester: backend (pytest) och frontend (Jest + React Testing Library)
 * [ ] Docker-image för Admin UI och uppdatera `docker-compose.yaml`
 * [ ] GitHub Actions: bygg, lint, test för backend och frontend
@@ -113,34 +119,33 @@ FILES är en skalbar, modulär och portabel webbapplikation som kan köras var s
 
 1. 🔔 **Konfigurationsbanner**
 
-   * Implementera i `SettingsPage.jsx` baserat på `settings.rbac_enabled` (red banner)
+   * Implementera i `SettingsPage.jsx` baserat på `settings.rbac_enabled` (röd banner)
 2. 🖼️ **Logotyp-uppladdning**
 
-   * Backend: `POST /admin/logo`, spara fil och uppdatera `settings.logo_url`
-   * Frontend: fil-input, förhandsvisning och upload via axios
+   * Backend: `POST /admin/logo`, spara URL i `settings.logo_url`
+   * Frontend: fil-input + preview i SettingsPage
 3. 🗑️ **Retention Cleanup**
 
    * Worker: schemalägg rensning enligt `settings.cleanup_schedule`
    * Frontend: toggle för `retention_enabled`
-4. 📊 **Observability**
+4. 🧪 **Testautomation & CI**
 
-   * Lägg till `/metrics` i FastAPI med Prometheus-instrumentering
-   * Integrera OpenTelemetry tracing i både API och worker
-5. 🛡 **Input-validering & Säkerhet**
+   * Skriv och kör enhetstester (pytest, Jest)
+   * Sätt upp GitHub Actions: bygg, lint, test för backend & frontend
+5. 📊 **Observability**
 
-   * Validera MIME-typ och magic bytes i upload-endpoint
-   * Ange maximal filstorlek
-6. 🏎 **Async Uppsättning**
+   * Lägg till `/metrics` i FastAPI m.h.a. Prometheus-instrumentering
+   * Integrera OpenTelemetry i API och worker
+6. 🛡 **Input‑validering & Säkerhet**
 
-   * Migrera till `asyncpg` och `aio-pika` för icke-blockerande IO
-   * Minska latens vid samtidiga anrop
-7. 🧪 **Testautomation & CI**
+   * Validera MIME-typ + magic bytes i upload
+   * Begränsa maximal filstorlek
+7. ⚙️ **Cache & Async**
 
-   * Skriv och kör enhetstester, starta GitHub Actions-workflow
-   * Inkludera integrationstest för upload-scan-download
-8. 📦 **Docker & Release**
+   * Cachea settings med `lru_cache` eller batch-hämtning
+   * Överväg `asyncpg` + `aio-pika` för asynkrona anrop
+8. 🎯 **Release v0.1.0**
 
    * Paketera Admin UI image, uppdatera Compose
-   * Tagga och publicera v0.1.0 med changelog
-
+   * Tagga och publicera med changelog
 
