@@ -149,10 +149,4 @@ Applikationen är designad för att användare ska kunna ladda upp filer, vilka 
    * Paketera Admin UI image, uppdatera Compose
    * Tagga och publicera med changelog
 
----
 
-*Skillnader mot tidigare plan:*
-
-* Rensat duplicerade rubriker
-* Komprimerat och sekventierat Next Steps-listan effektivt
-* Säkerställt konsekvens i numrering och formatering\*
