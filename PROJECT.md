@@ -120,30 +120,32 @@ Applikationen är designad för att användare ska kunna ladda upp filer, vilka 
 
    * Backend: `POST /admin/logo`, spara URL i `settings.logo_url`
    * Frontend: fil-input + preview i SettingsPage
-2. 🖼️ **Logotyp-uppladdning**
 
-   * Backend: `POST /admin/logo`, spara URL i `settings.logo_url`
-   * Frontend: fil-input + preview i SettingsPage
-3. 🗑️ **Retention Cleanup**
+2. 🗑️ **Retention Cleanup**
 
    * Worker: schemalägg rensning enligt `settings.cleanup_schedule`
    * Frontend: toggle för `retention_enabled`
-4. 🧪 **Testautomation & CI**
+     
+3. 🧪 **Testautomation & CI**
 
    * Skriv och kör enhetstester (pytest, Jest)
    * Sätt upp GitHub Actions: bygg, lint, test för backend & frontend
-5. 📊 **Observability**
+
+4. 📊 **Observability**
 
    * Lägg till `/metrics` i FastAPI m.h.a. Prometheus-instrumentering
    * Integrera OpenTelemetry i API och worker
-6. 🛡 **Input‑validering & Säkerhet**
+
+5. 🛡 **Input‑validering & Säkerhet**
 
    * Validera MIME-typ + magic bytes i upload
    * Begränsa maximal filstorlek
-7. ⚙️ **Cache & Async**
+
+6. ⚙️ **Cache & Async**
 
    * Cachea settings med `lru_cache` eller batch-hämtning
    * Överväg `asyncpg` + `aio-pika` för asynkrona anrop
+
 8. 🎯 **Release v0.1.0**
 
    * Paketera Admin UI image, uppdatera Compose
