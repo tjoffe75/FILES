@@ -21,12 +21,13 @@ Lösningen är designad för hög skalbarhet, modulär utbyggnad och kan integre
    * Visning av checksumvärden.
 2. **Admin-del (Web Admin UI)**
 
-   * Konfiguration av skanningsmotorer och algoritmer.
-   * Hantering av användare och RBAC.
+   * **Dynamisk konfiguration**: Alla applikationsinställningar (skanningsmotorer, algoritmer, RBAC-regler etc.) lagras i databasen för realtidsuppdatering utan omstart.
+   * Hantering av användare och RBAC via databasdriven policy.
    * Systemövervakning och statistik.
 3. **Backend API**
 
    * Endpoints för att initiera och hämta resultatuppgifter.
+   * Endpoints för att läsa och uppdatera konfigurationsinställningar i databasen.
    * Asynkron orkestrering via RabbitMQ.
 4. **Worker-tjänster**
 
